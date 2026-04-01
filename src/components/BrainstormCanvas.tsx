@@ -177,7 +177,7 @@ export default function BrainstormCanvas() {
   const dragRef = useRef<{ id: string; offsetX: number; offsetY: number } | null>(null);
   const groupDragRef = useRef<{ offsets: Record<string, { dx: number; dy: number }>; bhOffsets: Record<string, { dx: number; dy: number }> } | null>(null);
   const resizeRef = useRef<{ id: string; startSize: number; startY: number } | null>(null);
-  const orbitPreviewRef = useRef<{ targetId: string; radius: number; targetX: number; targetY: number } | null>(null);
+  const orbitPreviewRef = useRef<{ targetId: string; radius: number; targetX: number; targetY: number; x?: number; y?: number } | null>(null);
   const marqueeRef = useRef<{ startX: number; startY: number } | null>(null);
   const historyRef = useRef<CanvasSnapshot[]>([]);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -618,7 +618,7 @@ export default function BrainstormCanvas() {
         // Check proximity for orbit
         const ps = planetsRef.current;
         const bhs = blackHolesRef.current;
-        let closest: { id: string; x: number; y: number; dist: number } | null = null;
+        let closest: { id: string; x: number; y: number; dist: number; previewX?: number; previewY?: number } | null = null;
 
         for (const p of ps) {
           if (p.id === dragId) continue;
@@ -629,6 +629,31 @@ export default function BrainstormCanvas() {
             closest = { id: p.id, x: pos.x, y: pos.y, dist };
           }
         }
+
+        for (const orbitPlanet of ps) {
+          if (!orbitPlanet.orbitTargetId) continue;
+          if (orbitPlanet.id === dragId) continue;
+          if (blockedTargetIds.has(orbitPlanet.orbitTargetId)) continue;
+
+          const center = displayPos[orbitPlanet.orbitTargetId];
+          if (!center) continue;
+
+          const distanceFromCenter = Math.hypot(newX - center.x, newY - center.y);
+          const distanceToOrbit = Math.abs(distanceFromCenter - orbitPlanet.orbitRadius);
+
+          if (distanceToOrbit < 16 && (!closest || distanceToOrbit < closest.dist)) {
+            const angle = Math.atan2(newY - center.y, newX - center.x);
+            closest = {
+              id: orbitPlanet.orbitTargetId,
+              x: center.x,
+              y: center.y,
+              dist: distanceToOrbit,
+              previewX: center.x + orbitPlanet.orbitRadius * Math.cos(angle),
+              previewY: center.y + orbitPlanet.orbitRadius * Math.sin(angle),
+            };
+          }
+        }
+
         for (const bh of bhs) {
           const dist = Math.hypot(newX - bh.x, newY - bh.y);
           if (dist < ORBIT_PROXIMITY && (!closest || dist < closest.dist)) {
@@ -637,7 +662,22 @@ export default function BrainstormCanvas() {
         }
 
         if (closest) {
-          orbitPreviewRef.current = { targetId: closest.id, radius: closest.dist, targetX: closest.x, targetY: closest.y };
+          if (closest.previewX !== undefined && closest.previewY !== undefined) {
+            const radius = Math.hypot(closest.previewX - closest.x, closest.previewY - closest.y);
+            setPlanets(prev => prev.map(p =>
+              p.id === dragId ? { ...p, x: closest.previewX!, y: closest.previewY! } : p
+            ));
+            orbitPreviewRef.current = {
+              targetId: closest.id,
+              radius,
+              targetX: closest.x,
+              targetY: closest.y,
+              x: closest.previewX,
+              y: closest.previewY,
+            };
+          } else {
+            orbitPreviewRef.current = { targetId: closest.id, radius: closest.dist, targetX: closest.x, targetY: closest.y };
+          }
         } else {
           orbitPreviewRef.current = null;
         }
@@ -723,11 +763,20 @@ export default function BrainstormCanvas() {
           const draggedPlanet = planetsRef.current.find(p => p.id === dragId);
           if (draggedPlanet) {
             const angle = Math.atan2(
-              draggedPlanet.y - preview.targetY,
-              draggedPlanet.x - preview.targetX
+              (preview.y ?? draggedPlanet.y) - preview.targetY,
+              (preview.x ?? draggedPlanet.x) - preview.targetX
             );
             setPlanets(prev => prev.map(p =>
-              p.id === dragId ? { ...p, orbitTargetId: preview.targetId, orbitRadius: preview.radius, orbitAngle: angle } : p
+              p.id === dragId
+                ? {
+                    ...p,
+                    x: preview.x ?? p.x,
+                    y: preview.y ?? p.y,
+                    orbitTargetId: preview.targetId,
+                    orbitRadius: preview.radius,
+                    orbitAngle: angle,
+                  }
+                : p
             ));
           }
         }
@@ -1107,14 +1156,14 @@ export default function BrainstormCanvas() {
         <defs>
           <marker
             id="orbit-arrowhead"
-            markerWidth="10"
-            markerHeight="10"
-            refX="8"
-            refY="5"
+            markerWidth="7"
+            markerHeight="7"
+            refX="6"
+            refY="3.5"
             orient="auto"
             markerUnits="strokeWidth"
           >
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="hsl(220, 18%, 42%)" />
+            <path d="M 0 0 L 7 3.5 L 0 7 z" fill="hsl(220, 18%, 42%)" />
           </marker>
         </defs>
 
@@ -1131,7 +1180,7 @@ export default function BrainstormCanvas() {
                 x2={points.x2}
                 y2={points.y2}
                 stroke={isSelected ? 'hsl(215, 70%, 52%)' : 'hsl(220, 18%, 42%)'}
-                strokeWidth={isSelected ? '3' : '2'}
+                strokeWidth={connection.type === 'arrow' ? (isSelected ? '2.1' : '1.4') : (isSelected ? '3' : '2')}
                 opacity={0.95}
                 markerEnd={connection.type === 'arrow' ? 'url(#orbit-arrowhead)' : undefined}
                 pointerEvents="none"
