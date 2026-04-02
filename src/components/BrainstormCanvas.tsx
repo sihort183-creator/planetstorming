@@ -666,8 +666,7 @@ export default function BrainstormCanvas() {
           if (orbitPlanet.id === dragId) continue;
           if (blockedTargetIds.has(orbitPlanet.orbitTargetId)) continue;
 
-          const center = displayPos[orbitPlanet.orbitTargetId];
-          if (!center) continue;
+          const center = getPos(orbitPlanet.orbitTargetId, ps, bhs);
 
           const distanceFromCenter = Math.hypot(newX - center.x, newY - center.y);
           const distanceToOrbit = Math.abs(distanceFromCenter - orbitPlanet.orbitRadius);
@@ -734,8 +733,7 @@ export default function BrainstormCanvas() {
       if (orbitResizeRef.current) {
         const { x: mouseX, y: mouseY } = getCanvasPoint(e.clientX, e.clientY);
         const { id, targetId, angle } = orbitResizeRef.current;
-        const targetPos = displayPos[targetId];
-        if (!targetPos) return;
+        const targetPos = getPos(targetId, planetsRef.current, blackHolesRef.current);
 
         const nextRadius = Math.max(24, Math.hypot(mouseX - targetPos.x, mouseY - targetPos.y));
 
@@ -854,7 +852,7 @@ export default function BrainstormCanvas() {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [collectOrbiters, displayPos, getCanvasPoint, getPos]);
+  }, [collectOrbiters, getCanvasPoint, getPos]);
 
   // Keyboard
   useEffect(() => {
