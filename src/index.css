@@ -273,6 +273,22 @@ All colors MUST be HSL.
   opacity: 1;
 }
 
+.orbit-resize-hitbox {
+  pointer-events: auto;
+}
+
+.orbit-resize-handle {
+  fill: hsl(215, 72%, 56%);
+  stroke: hsl(0, 0%, 100%);
+  stroke-width: 2px;
+  cursor: ew-resize;
+  filter: drop-shadow(0 2px 4px hsla(215, 60%, 30%, 0.22));
+}
+
+.orbit-resize-handle:hover {
+  fill: hsl(215, 72%, 50%);
+}
+
 .blackhole-el {
   position: absolute;
   width: 30px;

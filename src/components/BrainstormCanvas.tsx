@@ -177,7 +177,16 @@ export default function BrainstormCanvas() {
   const dragRef = useRef<{ id: string; offsetX: number; offsetY: number } | null>(null);
   const groupDragRef = useRef<{ offsets: Record<string, { dx: number; dy: number }>; bhOffsets: Record<string, { dx: number; dy: number }> } | null>(null);
   const resizeRef = useRef<{ id: string; startSize: number; startY: number } | null>(null);
-  const orbitPreviewRef = useRef<{ targetId: string; radius: number; targetX: number; targetY: number; x?: number; y?: number } | null>(null);
+  const orbitResizeRef = useRef<{ id: string; targetId: string; angle: number } | null>(null);
+  const orbitPreviewRef = useRef<{
+    targetId: string;
+    radius: number;
+    targetX: number;
+    targetY: number;
+    x?: number;
+    y?: number;
+    mode?: 'new-orbit' | 'existing-orbit';
+  } | null>(null);
   const marqueeRef = useRef<{ startX: number; startY: number } | null>(null);
   const historyRef = useRef<CanvasSnapshot[]>([]);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -218,6 +227,7 @@ export default function BrainstormCanvas() {
     dragRef.current = null;
     groupDragRef.current = null;
     resizeRef.current = null;
+    orbitResizeRef.current = null;
     marqueeRef.current = null;
     setMarquee(null);
   }, []);
@@ -323,6 +333,7 @@ export default function BrainstormCanvas() {
         dragRef.current = null;
         groupDragRef.current = null;
         resizeRef.current = null;
+        orbitResizeRef.current = null;
         marqueeRef.current = null;
         setMarquee(null);
 
@@ -559,10 +570,30 @@ export default function BrainstormCanvas() {
     resizeRef.current = { id, startSize: planet.size, startY: e.clientY };
   }, [pushHistorySnapshot]);
 
+  const handleOrbitResizeMouseDown = useCallback((e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    e.preventDefault();
+
+    const planet = planetsRef.current.find(p => p.id === id);
+    if (!planet?.orbitTargetId) return;
+
+    pushHistorySnapshot();
+    orbitResizeRef.current = {
+      id,
+      targetId: planet.orbitTargetId,
+      angle: planet.orbitAngle,
+    };
+  }, [pushHistorySnapshot]);
+
   // Marquee start on canvas mousedown
   const handleCanvasMouseDown = useCallback((e: React.MouseEvent) => {
     if (isConnectionMode) return;
-    if ((e.target as HTMLElement).closest('.planet-el') || (e.target as HTMLElement).closest('.control-btn')) return;
+    if (
+      (e.target as HTMLElement).closest('.planet-el') ||
+      (e.target as HTMLElement).closest('.control-btn') ||
+      (e.target as HTMLElement).closest('.orbit-resize-hitbox') ||
+      (e.target as HTMLElement).closest('.orbit-resize-handle')
+    ) return;
     const { x, y } = getCanvasPoint(e.clientX, e.clientY);
     marqueeRef.current = { startX: x, startY: y };
     setMarquee({ startX: x, startY: y, endX: x, endY: y });
@@ -674,9 +705,16 @@ export default function BrainstormCanvas() {
               targetY: closest.y,
               x: closest.previewX,
               y: closest.previewY,
+              mode: 'existing-orbit',
             };
           } else {
-            orbitPreviewRef.current = { targetId: closest.id, radius: closest.dist, targetX: closest.x, targetY: closest.y };
+            orbitPreviewRef.current = {
+              targetId: closest.id,
+              radius: closest.dist,
+              targetX: closest.x,
+              targetY: closest.y,
+              mode: 'new-orbit',
+            };
           }
         } else {
           orbitPreviewRef.current = null;
@@ -691,6 +729,27 @@ export default function BrainstormCanvas() {
         setPlanets(prev => prev.map(p =>
           p.id === resId ? { ...p, size: newSize } : p
         ));
+      }
+
+      if (orbitResizeRef.current) {
+        const { x: mouseX, y: mouseY } = getCanvasPoint(e.clientX, e.clientY);
+        const { id, targetId, angle } = orbitResizeRef.current;
+        const targetPos = displayPos[targetId];
+        if (!targetPos) return;
+
+        const nextRadius = Math.max(24, Math.hypot(mouseX - targetPos.x, mouseY - targetPos.y));
+
+        setPlanets(prev => prev.map(p =>
+          p.id === id
+            ? {
+                ...p,
+                orbitRadius: nextRadius,
+                x: targetPos.x + nextRadius * Math.cos(angle),
+                y: targetPos.y + nextRadius * Math.sin(angle),
+              }
+            : p
+        ));
+        forceRender(n => n + 1);
       }
     };
 
@@ -785,6 +844,7 @@ export default function BrainstormCanvas() {
       dragRef.current = null;
       groupDragRef.current = null;
       resizeRef.current = null;
+      orbitResizeRef.current = null;
       forceRender(n => n + 1);
     };
 
@@ -794,7 +854,7 @@ export default function BrainstormCanvas() {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [collectOrbiters, getCanvasPoint, getPos]);
+  }, [collectOrbiters, displayPos, getCanvasPoint, getPos]);
 
   // Keyboard
   useEffect(() => {
@@ -1142,7 +1202,12 @@ export default function BrainstormCanvas() {
         onDoubleClick={handleDoubleClick}
         onMouseDown={handleCanvasMouseDown}
         onClick={(e) => {
-          if (!(e.target as HTMLElement).closest('.planet-el') && !(e.target as HTMLElement).closest('.connection-hitbox')) {
+          if (
+            !(e.target as HTMLElement).closest('.planet-el') &&
+            !(e.target as HTMLElement).closest('.connection-hitbox') &&
+            !(e.target as HTMLElement).closest('.orbit-resize-hitbox') &&
+            !(e.target as HTMLElement).closest('.orbit-resize-handle')
+          ) {
             setSelectedIds(new Set());
             setSelectedConnectionIds(new Set());
           }
@@ -1208,31 +1273,75 @@ export default function BrainstormCanvas() {
         {planets.filter(p => p.orbitTargetId).map(p => {
           const tPos = displayPos[p.orbitTargetId!];
           if (!tPos) return null;
+          const isSelectedOrbit = selectedIds.size === 1 && selectedIds.has(p.id);
+          const handleX = tPos.x + p.orbitRadius * Math.cos(p.orbitAngle);
+          const handleY = tPos.y + p.orbitRadius * Math.sin(p.orbitAngle);
+
           return (
-            <circle
-              key={`orbit-${p.id}`}
-              cx={tPos.x} cy={tPos.y} r={p.orbitRadius}
-              fill="none"
-              stroke="hsl(0, 0%, 78%)"
-              strokeWidth="1"
-              strokeDasharray="6 4"
-              opacity={0.6}
-              pointerEvents="none"
-            />
+            <g key={`orbit-${p.id}`}>
+              {isSelectedOrbit && (
+                <circle
+                  className="orbit-resize-hitbox"
+                  cx={tPos.x}
+                  cy={tPos.y}
+                  r={p.orbitRadius}
+                  fill="none"
+                  stroke="transparent"
+                  strokeWidth="18"
+                  style={{ cursor: 'ew-resize' }}
+                  onMouseDown={(e) => handleOrbitResizeMouseDown(e, p.id)}
+                />
+              )}
+              <circle
+                cx={tPos.x}
+                cy={tPos.y}
+                r={p.orbitRadius}
+                fill="none"
+                stroke={isSelectedOrbit ? 'hsl(215, 72%, 56%)' : 'hsl(0, 0%, 78%)'}
+                strokeWidth={isSelectedOrbit ? '1.8' : '1'}
+                strokeDasharray="6 4"
+                opacity={isSelectedOrbit ? 0.92 : 0.6}
+                pointerEvents="none"
+              />
+              {isSelectedOrbit && (
+                <circle
+                  className="orbit-resize-handle"
+                  cx={handleX}
+                  cy={handleY}
+                  r="7"
+                  onMouseDown={(e) => handleOrbitResizeMouseDown(e, p.id)}
+                />
+              )}
+            </g>
           );
         })}
 
         {/* Orbit preview */}
         {preview && (
-          <circle
-            cx={preview.targetX} cy={preview.targetY} r={preview.radius}
-            fill="none"
-            stroke="hsl(220, 45%, 60%)"
-            strokeWidth="2"
-            strokeDasharray="8 4"
-            opacity={0.8}
-            pointerEvents="none"
-          />
+          <>
+            <circle
+              cx={preview.targetX}
+              cy={preview.targetY}
+              r={preview.radius}
+              fill="none"
+              stroke={preview.mode === 'existing-orbit' ? 'hsl(42, 92%, 52%)' : 'hsl(220, 45%, 60%)'}
+              strokeWidth={preview.mode === 'existing-orbit' ? '3' : '2'}
+              strokeDasharray={preview.mode === 'existing-orbit' ? '10 5' : '8 4'}
+              opacity={0.9}
+              pointerEvents="none"
+            />
+            {preview.mode === 'existing-orbit' && preview.x !== undefined && preview.y !== undefined && (
+              <circle
+                cx={preview.x}
+                cy={preview.y}
+                r="10"
+                fill="hsla(42, 92%, 52%, 0.18)"
+                stroke="hsl(42, 92%, 45%)"
+                strokeWidth="2"
+                pointerEvents="none"
+              />
+            )}
+          </>
         )}
       </svg>
 
