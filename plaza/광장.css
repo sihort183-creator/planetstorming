@@ -16,3 +16,4 @@ body #holding input:not([type=radio]),body #holding select{background:#ffffffb3;
 #holding .role-switch input:checked+span{font-weight:600}
 #holding .role-switch label:has(input:focus-visible){outline:2px solid var(--earth);outline-offset:-2px;border-radius:999px}
 @media(prefers-reduced-motion:reduce){#holding .role-switch::before{transition:none}}
+.stake-reactions summary{opacity:0;width:1px;height:1px;padding:0;overflow:hidden}.stake-reactions summary:focus-visible{opacity:1;width:25px;height:25px}.stake-reactions{pointer-events:none}.stake-reactions .emoji-tools,.stake-reactions summary{pointer-events:auto}

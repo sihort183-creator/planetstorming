@@ -53,10 +53,15 @@ def players(known=(),viewer=None):
     counts={}
     for r in db.execute('SELECT target,emoji,count(*),max(author=?) FROM reactions GROUP BY target,emoji ORDER BY target,count(*) DESC,emoji',(viewer,)):
         counts.setdefault(r[0],[]).append([r[1],r[2],bool(r[3])])
-    now=time.monotonic();out=[]
+    now=time.monotonic();out=[];online={}
+    for key,pos in list(presence.items()):
+        if now-pos['time']>18:
+            del presence[key]
+        elif pos['time']>=online.get(key[0],{}).get('time',0):
+            online[key[0]]=pos
     for row in db.execute('select id,nick,role,stock,slot from people order by slot'):
-        uid=row['id'];x,z=spawn(row['slot']);pos=presence.get(uid,{})
-        if now-pos.get('time',-999)>12:pos={}
+        uid=row['id'];x,z=spawn(row['slot']);pos=online.get(uid,{})
+        if uid!=viewer and not pos:continue
         out.append(dict(reactions=counts.get(uid,[]),id=uid,nick=row['nick'],role=row['role'],stock=json.loads(row['stock']) if row['stock'] else None,x=x,z=z,moving=pos.get('moving'),slot=row['slot']))
     for p in out:
         if p["id"] in known and p["stock"]:p["stock"].pop("logo",None)
@@ -128,6 +133,11 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 db.execute('DELETE FROM reactions WHERE target=? AND emoji=? AND author=?',(target,emoji,uid))
             return self.reply(200,{'ok':True})
+        token=digest(SimpleCookie(self.headers['Cookie'])['plaza'].value)
+        tab=str(d.get('tab','default'))[:80]
+        if self.path=='/away':
+            presence.pop((uid,token,tab),None)
+            return self.reply(200,{})
         if self.path=='/move':
             row=db.execute('select role from people where id=?',(uid,)).fetchone()
             m=d.get('moving');role=row[0]
@@ -138,10 +148,12 @@ class Handler(BaseHTTPRequestHandler):
                 if not all(math.isfinite(v) for v in values):raise ValueError('이동 좌표 오류')
                 m=dict(zip(('x','z','yaw'),values));m.update(mode=mode)
                 for k in ('x','z'):m[k]=max(-99,min(99,m[k]))
-            presence[uid]=dict(time=time.monotonic(),moving=m)
+            presence[(uid,token,tab)]=dict(time=time.monotonic(),moving=m)
             return self.reply(200,dict(me=uid,players=players(set(d.get("known",[])),uid)))
         if self.path=='/leave':
-            db.execute('delete from sessions where token=?',(digest(SimpleCookie(self.headers['Cookie'])['plaza'].value),));presence.pop(uid,None)
+            db.execute('delete from sessions where token=?',(digest(SimpleCookie(self.headers['Cookie'])['plaza'].value),))
+            for key in list(presence):
+                if key[:2]==(uid,token):del presence[key]
             return self.reply(200,{},cookie='plaza=; Path=/; Max-Age=0; SameSite=Strict')
         return self.reply(404,{})
 if __name__=='__main__':

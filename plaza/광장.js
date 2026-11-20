@@ -4,6 +4,7 @@ const Plaza=(()=>{
  let api,world={me:null,players:[]},self=null,ghost=false,entered=false;
  let px=0,pz=0,heading=0,entryYaw=0,orbitPitch=.12,pending=false,lastSync=0;
  const actors=new Map(),moving=new Map(),cardImages=new Map();
+ const tabKey=Array.from(crypto.getRandomValues(new Uint32Array(4))).join("-");
  let boundTemplate,clock=0,lastUI=0;
  function text(el,value){el.textContent=value;return el}
  function element(tag,cls){const e=document.createElement(tag);if(cls)e.className=cls;return e}
@@ -90,36 +91,52 @@ const Plaza=(()=>{
    base=element('div','stake-reactions');base.hidden=true;g('world-tags').append(base);
    reactionPanel(base,p);
   }
-  return {node,tag,cry,lift,card,base}
+  return {node,tag,cry,lift,card,base,stake:node.getObjectByName("stake")}
  }
  let emojiData,openPicker=null,firstPerson=null;
+ function medal(label,count,button){
+  const canvas=document.createElement('canvas');canvas.width=button?384:192;canvas.height=192;
+  const ctx=canvas.getContext('2d');ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.fillStyle=button?'#615044':'#f1dfba';ctx.fillRect(0,0,canvas.width,192);
+  ctx.fillStyle='#fff';ctx.font=button?'bold 66px sans-serif':'136px "Segoe UI Emoji",sans-serif';
+  ctx.fillText(label,canvas.width/2,count>1?84:98,canvas.width*.92);
+  if(count>1){ctx.fillStyle='#422f22';ctx.font='bold 42px sans-serif';ctx.fillText(String(count),96,161)}
+  const texture=new THREE.CanvasTexture(canvas),points=[0,0,.054],uv=[.5,.5],index=[];
+  const rx=button?.295:.128,ry=button?.105:.128,n=40;
+  for(const [scale,z] of [[.91,.054],[1,.034],[1,-.018]]){
+   for(let i=0;i<n;i++){
+    const angle=2*Math.PI*i/n,c=Math.cos(angle),t=Math.sin(angle);
+    const x=button?Math.sign(c)*Math.pow(Math.abs(c),.48):c,y=button?Math.sign(t)*Math.pow(Math.abs(t),.48):t;
+    points.push(rx*x*scale,ry*y*scale,z);uv.push(.5+.5*x*scale,.5+.5*y*scale);
+   }
+  }
+  for(let i=0;i<n;i++){
+   const k=1+i,l=1+(i+1)%n;index.push(0,k,l);
+   for(const a of [0,n])index.push(k+a,l+n+a,l+a,k+a,k+n+a,l+n+a)
+  }
+  const mat=new THREE.ShaderMaterial({uniforms:{face:{value:texture}},side:THREE.DoubleSide,
+   vertexShader:'varying vec2 tc;varying float z;void main(){tc=uv;z=position.z;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
+   fragmentShader:'uniform sampler2D face;varying vec2 tc;varying float z;void main(){vec3 c=texture2D(face,tc).rgb;gl_FragColor=vec4(mix(vec3(.27,.20,.15),c,smoothstep(.027,.054,z)),1.);}'});
+  return mesh(points,uv,index,mat)
+ }
+ function clearMedal(obj){obj.removeFromParent();obj.geometry.dispose();obj.material.uniforms.face.value.dispose();obj.material.dispose()}
+ function mountBadge(a,obj,angle,h){
+  const post=a.stake;
+  obj.scale.set(1/post.scale.x,1/post.scale.y,1/post.scale.z);
+  obj.position.set(.245*Math.sin(angle),h/post.scale.y,-.72+.205*Math.cos(angle));
+  // Rotate outside the nonuniform scale so the raised face keeps its proportions.
+  const joint=new THREE.Group();joint.position.copy(obj.position);joint.scale.copy(obj.scale);
+  obj.position.set(0,0,0);obj.scale.set(1,1,1);obj.rotation.y=angle;post.add(joint);joint.add(obj);return joint
+ }
  function stakeStickers(a,rows){
+  if(!a.press){a.press=medal('이모지 ＋',0,true);mountBadge(a,a.press,0,.50)}
   const visible=rows.slice(0,6),key=JSON.stringify(visible.map(([e,n])=>[e,n]));
   if(a.markKey===key)return;a.markKey=key;
-  if(!visible.length&&!a.markCanvas)return;
-  if(!a.markCanvas){
-   const stake=a.node.getObjectByName('stake');
-   const canvas=document.createElement('canvas');canvas.width=640;canvas.height=200;
-   const texture=new THREE.CanvasTexture(canvas);
-   const material=stake.material.clone();
-   material.uniforms.stickers={value:texture};
-   material.uniforms.bandHeight={value:.245*2.6*stake.scale.x*canvas.height/(canvas.width*stake.scale.y)};
-   material.uniforms.baseY={value:.05/stake.scale.y};
-   material.vertexShader='varying vec3 woodPoint;\n'+material.vertexShader.replace('color=shade;', 'woodPoint=position;color=shade;');
-   material.fragmentShader='varying vec3 woodPoint;uniform sampler2D stickers;uniform float bandHeight,baseY;\n'+material.fragmentShader.replace('gl_FragColor=vec4(color*', `
-    float angle=atan(woodPoint.x/.245,(woodPoint.z+.72)/.205);
-    vec2 uv=vec2(.5+angle/2.6,(woodPoint.y-baseY)/bandHeight);
-    vec4 sticker=texture2D(stickers,clamp(uv,0.,1.));
-    float inside=step(0.,uv.x)*step(uv.x,1.)*step(0.,uv.y)*step(uv.y,1.);
-    gl_FragColor=vec4(mix(color,sticker.rgb,inside*sticker.a)*`);
-   stake.material=material;a.markCanvas=canvas;a.stickerTexture=texture
-  }
-  const ctx=a.markCanvas.getContext('2d');ctx.clearRect(0,0,640,200);ctx.textAlign='center';ctx.textBaseline='middle';
-  visible.forEach(([emoji,n],i)=>{
-   const col=i%3,total=Math.min(3,visible.length-Math.floor(i/3)*3),x=320+(col-(total-1)/2)*190,y=visible.length>3?(i<3?49:148):143;
-   ctx.font='92px "Segoe UI Emoji",sans-serif';ctx.fillText(emoji,x,y);
-   if(n>1){ctx.font='bold 40px sans-serif';ctx.lineWidth=5;ctx.strokeStyle='#362c24';ctx.strokeText(String(n),x+49,y+23);ctx.fillStyle='white';ctx.fillText(String(n),x+49,y+23)}
-  });a.stickerTexture.needsUpdate=true
+  for(const joint of a.badges||[]){clearMedal(joint.children[0]);joint.removeFromParent()}
+  a.badges=visible.map(([emoji,n],i)=>{
+   const col=i%3,width=Math.min(3,visible.length-Math.floor(i/3)*3);
+   return mountBadge(a,medal(emoji,n,false),(col-(width-1)/2)*.85,visible.length>3&&i<3?.33:.145)
+  });
  }
  const groups=['표정과 하트','사람과 손짓','','동물과 자연','음식과 음료','여행과 장소','활동과 스포츠','물건','기호','깃발'];
  function reactionPanel(panel,p){
@@ -168,7 +185,7 @@ const Plaza=(()=>{
  }
  function inspect(p){
   p=actors.get(p.id)?.data||p;
-  const panel=g('inspect');panel.replaceChildren();const close=text(element('button'),'닫기');close.onclick=()=>{panel.hidden=true};
+  const panel=g('inspect');panel.dataset.owner=p.id;panel.replaceChildren();const close=text(element('button'),'닫기');close.onclick=()=>{panel.hidden=true};
   panel.append(text(element('strong'),p.nick),close);
   if(p.stock){
    const s=p.stock,img=new Image();img.src=s.logo;img.alt='';panel.append(img,text(element('span'),s.name+' '+s.symbol));
@@ -181,6 +198,16 @@ const Plaza=(()=>{
  function receive(state){
   if(!state.me)return;
   world=state;
+  const active=new Set(state.players.map(p=>p.id));
+  for(const [id,a] of actors)if(!active.has(id)){
+   if(openPicker&&a.base?.contains(openPicker))openPicker=null;
+   a.tag.remove();a.cry.remove();a.base?.remove();a.node.removeFromParent();
+   if(a.press)clearMedal(a.press);
+   for(const joint of a.badges||[])clearMedal(joint.children[0]);
+   if(a.card){a.card.material.uniforms.card.value.dispose();a.card.material.dispose();a.card.geometry.dispose()}
+   const m=moving.get(id);if(m){m.group.removeFromParent();m.dispose?.();moving.delete(id)}
+   actors.delete(id);if(g('inspect').dataset.owner===String(id))g('inspect').hidden=true
+  }
   for(const p of world.players){
    const old=actors.get(p.id);
    if(old&&p.stock&&!p.stock.logo)p.stock.logo=old.data.stock.logo;
@@ -198,7 +225,7 @@ const Plaza=(()=>{
  async function sync(){
   if(pending||!entered)return;pending=true;
   try{const mode=self.role==='cash'?'walk':ghost?'ghost':null;
-   receive(await request('move',{known:[...actors.keys()],moving:mode?{mode,x:px,z:pz,yaw:heading}:null}));g('network').hidden=true
+   receive(await request('move',{tab:tabKey,known:[...actors.keys()],moving:mode?{mode,x:px,z:pz,yaw:heading}:null}));g('network').hidden=true
   }catch{g('network').hidden=false}finally{pending=false}
  }
  function drawMoving(p,mode,x,z,yaw,dt){
@@ -247,7 +274,8 @@ const Plaza=(()=>{
    const group=drawMoving(self,ghost?'ghost':'walk',px,pz,heading,dt);
    group.visible=!first;eyeY=moving.get(self.id).eyeHeight()
   }
-  own.node.visible=walking||!first;
+  own.node.visible=true;
+  if(own.stake){for(const part of own.stake.parent.children)part.visible=walking||!first||part===own.stake}
   if(first){
    api.camera.position.set(px,eyeY,pz);
    api.camera.rotation.set(pitch,walking?-yaw:Math.PI-.20-yaw,0,'YXZ');
@@ -270,11 +298,11 @@ const Plaza=(()=>{
    if(a.base){
 
     const near=Math.hypot(px-p.x,pz-p.z)<9;
-    if(near&&a.node.visible)project(a.base,p.x+.04,api.height(p.x,p.z)+.018,p.z+.18,7);else a.base.hidden=true;
+    if(near&&a.press){const at=a.press.getWorldPosition(new THREE.Vector3());project(a.base,at.x,at.y,at.z)}else a.base.hidden=true;
     if(a.base.hidden&&openPicker&&a.base.contains(openPicker))openPicker.open=false;
     else placePicker(a.base)
    }
-   if(!a.node.visible){a.tag.hidden=a.cry.hidden=true;continue}
+   if(!a.node.visible||(mine&&first&&!walking)){a.tag.hidden=a.cry.hidden=true;continue}
    const point=p.role==='cash'?avatar.position:a.node.position;
    const y=point.y+(p.role==='cash'?1.13:1.21+a.lift);
    if(Math.hypot(px-point.x,pz-point.z)>15){a.tag.hidden=a.cry.hidden=true;continue}
@@ -290,7 +318,7 @@ const Plaza=(()=>{
   for(const actor of actors.values()){
    if(!actor.card||!actor.node.visible)continue;
    actor.node.traverse(mesh=>{
-    if(!mesh.isMesh)return;
+    if(!mesh.isMesh)return;for(let n=mesh;n;n=n.parent)if(!n.visible)return;
     const geo=mesh.geometry,inv=mesh.matrixWorld.clone().invert();
     o.copy(origin).applyMatrix4(inv);dir.copy(direction).transformDirection(inv);
     if(!geo.boundingSphere)geo.computeBoundingSphere();
@@ -323,6 +351,8 @@ const Plaza=(()=>{
   })
  }
  async function init(){
+  addEventListener('pagehide',()=>{if(entered)navigator.sendBeacon('/away',new Blob([JSON.stringify({tab:tabKey})],{type:'application/json'}))});
+  setInterval(()=>{if(entered&&document.hidden)sync()},4000);
   const form=g('holding-form'),roleInputs=[...document.querySelectorAll('[name=role]')];let restoring=false;
   function fields(){
    const bound=!restoring&&roleInputs[0].checked;
