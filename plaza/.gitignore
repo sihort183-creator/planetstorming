@@ -1,0 +1,4 @@
+.plaza/
+.qa*/
+*.sqlite*
+__pycache__/
