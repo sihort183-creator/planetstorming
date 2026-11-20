@@ -11,8 +11,8 @@ FILES = {'반응-이모지.json', PAGE, '주식-종목목록.js', '페페-보행
 parser = argparse.ArgumentParser()
 parser.add_argument('--port',type=int,default=8765)
 parser.add_argument('--bind',default='127.0.0.1')
-parser.add_argument('--data',default=str(ROOT/'.plaza'))
-args=parser.parse_args()
+parser.add_argument('--data',default=os.environ.get('PLAZA_DATA',str(ROOT/'.plaza')))
+args=parser.parse_args(None if __name__=='__main__' else [])
 folder=Path(args.data);folder.mkdir(exist_ok=True,parents=True)
 db=sqlite3.connect(folder/'world.sqlite',check_same_thread=False,isolation_level=None)
 db.row_factory=sqlite3.Row
@@ -144,4 +144,5 @@ class Handler(BaseHTTPRequestHandler):
             db.execute('delete from sessions where token=?',(digest(SimpleCookie(self.headers['Cookie'])['plaza'].value),));presence.pop(uid,None)
             return self.reply(200,{},cookie='plaza=; Path=/; Max-Age=0; SameSite=Strict')
         return self.reply(404,{})
-ThreadingHTTPServer((args.bind,args.port),Handler).serve_forever()
+if __name__=='__main__':
+    ThreadingHTTPServer((args.bind,args.port),Handler).serve_forever()
